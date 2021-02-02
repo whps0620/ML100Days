@@ -1,0 +1,16 @@
+pymongo==3.5.1
+emoji==0.5.3
+pyshorteners==0.6.1
+monthdelta
+jieba==0.39
+lxml==4.4.1
+Flask
+beautifulsoup4
+line-bot-sdk
+gunicorn
+pandas
+requests
+GoogleNews
+scikit-learn
+cloudscraper
+selenium

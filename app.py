@@ -12,7 +12,6 @@ from linebot.exceptions import (
 from linebot.models import *
 from linebot.exceptions import LineBotApiError
 
-from dcard_tool import Dcardcrawler,weight_care_new_json
 import time
 import requests
 import random
@@ -20,20 +19,31 @@ import json
 import pandas as pd
 import datetime
 import emoji
-# 
+from fun.weight_fun import weight_care_new_json
+import pandas as pd
+from fun.ptt import Board, crawl_ptt_page, crawl_ptt_page_auto, crawl_ptt_page_auto_comment
+
+keyword = pd.read_csv('keyword_count_main.csv', encoding='cp950')
+
 # import mongodb
 # import scheduler
 
 
 # init flask
 app = Flask(__name__)
-line_bot_api = LineBotApi('vFPL8j39qWb8HtHNOZKzlLV1hEVIjjEssSI0EJ61c+P2aGLVAbtEHGBbG6ld+4E5emRL+8u3MBZRSfKQVdi18QeOf/QXoiXhPWXYfTS05w0qKggHlCd2WgHHQovvbKQOZUZOkdo4nt0oeB2SZBT5twdB04t89/1O/w1cDnyilFU=
-')
+
+# 必須放上自己的Channel Access Token
+line_bot_api = LineBotApi('vFPL8j39qWb8HtHNOZKzlLV1hEVIjjEssSI0EJ61c+P2aGLVAbtEHGBbG6ld+4E5emRL+8u3MBZRSfKQVdi18QeOf/QXoiXhPWXYfTS05w0qKggHlCd2WgHHQovvbKQOZUZOkdo4nt0oeB2SZBT5twdB04t89/1O/w1cDnyilFU=')
+
+# 必須放上自己的Channel Secret
 handler = WebhookHandler('1da69efc27acc97eadee26cf142d99b6')
+
+line_bot_api.push_message('U670cd66f86a530b3cd6e08e7c94b2a96', TextSendMessage(text='你可以開始了'))
+
 
 
 # for alarm sys from fb app
-
+# 監聽所有來自 /callback 的 Post Request
 @app.route("/callback", methods=['POST'])
 def callback():
     # get X-Line-Signature header value
@@ -41,7 +51,6 @@ def callback():
 
     # get request body as text
     body = request.get_data(as_text=True)
-    # print("body:",body)
     app.logger.info("Request body: " + body)
 
     # handle webhook body
@@ -49,10 +58,8 @@ def callback():
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
-
     return 'OK'
 
-# welcome words
 @handler.add(FollowEvent)
 def handle_follow(event):
     profile = line_bot_api.get_profile(event.source.user_id)
@@ -65,13 +72,13 @@ def handle_follow(event):
     buttons_template = TemplateSendMessage(
         alt_text='目錄',
         template=ButtonsTemplate(
-            title='您好～ 台評會IR小幫手',
-            text="提供您新聞學校每日新聞、台評會正負面口碑",
-            thumbnail_image_url='https://i.imgur.com/jpnKztr.jpg',
+            title='您好～ 我是TCB合庫小幫手',
+            text="提供您TCB專門抓取的內容",
+            thumbnail_image_url='https://i.imgur.com/aVTdVKH.jpg',
             actions=[
                 MessageTemplateAction(
-                    label='點我進入',
-                    text='點我進入'
+                    label='快速上手',
+                    text='快速上手'
                 )
             ]
         )
@@ -82,7 +89,6 @@ def handle_follow(event):
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    #print("event.reply_token:", event.reply_token)
     print("event.message.text:", event.message.text)
     text = event.message.text
     profile = line_bot_api.get_profile(event.source.user_id)
@@ -91,39 +97,129 @@ def handle_message(event):
     print('nameid:', nameid)
     print('uid:', uid)
 
+    #-------------- ptt 區塊-----------------
+    if re.search('PTT輿情資訊', event.message.text, re.IGNORECASE):
+        ptt_content = crawl_ptt_page_auto(Board_Name ='Finance' ,
+                                    page_num= 1)
 
-    # get user data.
-    # userinfo = mongodb.get_school_by_userid(uid)
-    #print('ok! go to action!')
-   
-    if re.search('dcard_.*', event.message.text, re.IGNORECASE): #set up a button event.message.text == "靠北負評預警": #set up a button
+        content_list, news_df = weight_care_new_json(
+                keyword = keyword , 
+                news_df = ptt_content, 
+                content_name = '內容', 
+                link_name='文章網址來源', 
+                time_name = '時間',
+                output_name = 'PTT_內容_產出')
+
+        # 轉換成文字內容，方便linebot push
+        if len(content_list)!=0:
+            content = ''
+            for i in content_list:
+                print(i)
+                content += i
+
+
+            line_bot_api.push_message(
+                    uid,
+                    TextSendMessage(text='#---------👇⭐PTT輿情資訊⭐👇---------#\n\n'+content+
+                                        '\n\n#---------☝⭐PTT輿情資訊⭐️☝---------#'))
+        else:
+            line_bot_api.push_message(
+                    uid,
+                    TextSendMessage(text='目前無最新消息'))
+
+    #-------------- 問題：google news 區塊-----------------
+    if re.search('近期新聞輿情資訊', event.message.text, re.IGNORECASE):
+        import datetime
+        today = datetime.date.today()
+        yesterday = today- datetime.timedelta(days = 1)
         
-        # school = '台灣科技大學'
-        # ename = 'ntust'
-        # text = 'dcard_ntust_台科大'
+        today1 = today.strftime("%Y/%m/%d")
+        yesterday1 = yesterday.strftime("%Y/%m/%d")
+ 
+        google_df = googlenews_function(keyword = '合庫', language = 'cn', start_date =today1, end_date =yesterday1)
+ 
+        content_list, news_df = weight_care_new_json(
+            keyword = keyword , 
+            news_df = google_df, 
+            content_name = 'title', 
+            link_name='link', 
+            time_name = 'datetime',
+            output_name = 'Googlenews_產出')
+ 
+        # 轉換成文字內容，方便linebot push
+        if len(content_list)!=0:
+            content = ''
+            for i in content_list:
+                print(i)
+                content += i
+ 
+            line_bot_api.push_message(
+                    uid,
+                    TextSendMessage(text='#---------👇⭐近期新聞輿情資訊⭐👇---------#\n\n'+content+
+                                        '\n\n#---------☝⭐近期新聞輿情資訊⭐️☝---------#'))
+        else:
+            line_bot_api.push_message(
+                    uid,
+                    TextSendMessage(text='目前無最新消息'))
 
-        text = event.message.text
-        ename = text.split('_')[1]
-        school = text.split('_')[2]
+    #-------------- dcard 區塊-----------------
+    if re.search('Dcard輿情資訊', event.message.text, re.IGNORECASE):
+            
+            # dcard function
+            dcard_postjs_df = dcard_keyword( word = '合作金庫', limit=10)
+            
+            # 輸出模式
+            content_list, news_df = weight_care_new_json(
+                keyword =keyword , 
+                news_df = dcard_postjs_df, 
+                content_name = '內文', 
+                link_name='資料來源網址', 
+                time_name = '時間',
+                output_name = 'Dcard_產出_關鍵字內文')
+    
+            # 轉換成文字內容，方便linebot push
+            if len(content_list)!=0:
+                content = ''
+                for i in content_list:
+                    print(i)
+                    content += i
+    
+                line_bot_api.push_message(
+                        uid,
+                        TextSendMessage(text='#---------👇⭐Dcard輿情資訊⭐👇---------#\n\n'+content+
+                                            '\n\n#---------☝⭐Dcard輿情資訊⭐️☝---------#'))
+            else:
+                line_bot_api.push_message(
+                        uid,
+                        TextSendMessage(text='目前無最新消息'))
 
-        content = Dcardcrawler(school=school, 
-                                ename= ename, 
-                                ).select_dcard()
+    #--------------til schedule：google review區塊-----------------
+    if re.search('Google Review輿情資訊', event.message.text, re.IGNORECASE):
+        reviews = google_review_reviews(
+                    search= "中和區 合作金庫", review_page_scroll =1)
+        for store in reviews['Store'].unique():
+            reviews_tmp = reviews[reviews['Store']==store]
 
-        keywordlist = pd.read_csv('keyword_count_main.csv')
+        content_list, news_df = weight_care_new_json(
+                    keyword =keyword , 
+                    news_df = reviews_tmp, 
+                    content_name = 'Text', 
+                    link_name='Store', 
+                    time_name = 'Date',
+                    output_name = 'google revew')
 
-        mss =  weight_care_new_json( content  , keywordlist = keywordlist)
+        # 轉換成文字內容，方便linebot push
+        content = ''
+        for i in content_list:
+            print(i)
+            content += i
 
-        cont = ''
-        for i in mss['message']:
-            # print(i)
-            cont += i
-
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=cont))
-
-        return 0
+        # 推播
+        line_bot_api.push_message(lineid,[
+                            TextSendMessage(text = '#---------👇⭐Google review' +'【'+store +'】' +'輿情資訊⭐👇---------#'),
+                            TextSendMessage(text = content),
+                            TextSendMessage(text = '#---------☝⭐Google review' +'【'+store +'】' +'輿情資⭐️☝---------#')
+                            ]) 
 
     if event.message.text == "dcard負評預警":
         line_bot_api.reply_message(
@@ -137,26 +233,27 @@ def handle_message(event):
         buttons_template = TemplateSendMessage(
             alt_text='常用社群預警',
             template=ButtonsTemplate(
-                title='校務上常用社群預警，目前囊括大學生常用的ptt與dcard',
+                title='tcb合庫小幫手的社群預警',
                 text='請選擇',
-                thumbnail_image_url='https://i.imgur.com/Dt97YFG.png',
+                thumbnail_image_url='https://i.imgur.com/bdcKYX1.png',
                 actions=[
+
                     MessageTemplateAction(
-                        label='dcard負評預警',
-                        text='dcard負評預警'
+                        label='PTT輿情資訊',
+                        text='PTT輿情資訊'
                     ),
                     MessageTemplateAction(
-                        label='ptt負評預警',
-                        text='ptt負評預警'
+                        label='近期新聞輿情資訊',
+                        text='近期新聞輿情資訊'
                     ),
                     MessageTemplateAction(
-                        label='靠北負評預警',
-                        text='靠北負評預警'
-                    ),  
-                       MessageTemplateAction(
-                           label='同儕學校靠北預警',
-                           text='同儕學校靠北預警'
-                       )
+                        label='Dcard輿情資訊',
+                        text='Dcard輿情資訊'
+                    ),
+                    MessageTemplateAction(
+                        label='Google Review輿情資訊',
+                        text='Google Review輿情資訊'
+                    ),
                 ]
             )
         )
@@ -164,22 +261,22 @@ def handle_message(event):
         return 0
     
     
-    if event.message.text == "使用說明":
+    if event.message.text == "查看網站":
         buttons_template = TemplateSendMessage(
-            alt_text='使用說明',
+            alt_text='查看網站',
             template=ButtonsTemplate(
-                title='IR 小幫手使用說明',
+                title='合庫小幫手使用說明',
                 text='請選擇',
                 thumbnail_image_url='https://i.imgur.com/Dt97YFG.png',
                 actions=[
                     MessageTemplateAction(
-                        label='快速上手',
-                        text='快速上手'
+                        label='查看網站',
+                        text='查看網站'
                     ),
                     {
                     "type": "uri",
-                    "label": "詳細說明手冊",
-                    "uri": "https://hackmd.io/s/SJtT1bStf"
+                    "label": "查看網站",
+                    "uri": "https://tmrmds.co/tcb-py-training/"
                     }   
                             
                 ]
@@ -220,4 +317,4 @@ def handle_message(event):
     
 
 if __name__ == '__main__':
-    app.run()
+    app.run(debug=True)
